@@ -10,6 +10,7 @@ from baseline.utils import (
     get_env_gpus,
     show_examples,
     import_user_module,
+    listify,
 )
 from mead.downloader import EmbeddingDownloader, DataDownloader
 from mead.utils import (
@@ -155,8 +156,8 @@ class Task(object):
             os.mkdir(basedir)
         self.config_params['train']['basedir'] = basedir
         # Read GPUS from env variables now so that the reader has access
-        if self.config_params['model'].get('gpus', 1) == -1:
-            self.config_params['model']['gpus'] = len(get_env_gpus())
+        if self.config_params['train'].get('gpus', -1) == -1:
+            self.config_params['train']['gpus'] = len(get_env_gpus())
         self.config_file = kwargs.get('config_file')
         self._setup_task()
         self._load_user_modules()
@@ -183,7 +184,7 @@ class Task(object):
         reader_params = self.config_params['loader']
         reader_params['clean_fn'] = reader_params.get('clean_fn', self.config_params['preproc'].get('clean_fn'))
         reader_params['mxlen'] = self.vectorizers[self.primary_key].mxlen
-        if self.config_params['model'].get('gpus', 1) > 1:
+        if self.config_params['train'].get('gpus', 1) > 1:
             reader_params['truncate'] = True
         return baseline.reader.create_reader(self.task_name(), self.vectorizers, self.config_params['preproc'].get('trim', False), **reader_params)
 
@@ -576,7 +577,7 @@ class EncoderDecoderTask(Task):
             backend.params = {'pc': _dynet.ParameterCollection(), 'batched': batched}
             self.config_params['preproc']['trim'] = True
         else:
-            self.config_params['preproc']['trim'] = True
+            self.config_params['preproc']['trim'] = False  # TODO: For datasets on ONLY
             from mead.tf.exporters import Seq2SeqTensorFlowExporter
             backend.exporter = Seq2SeqTensorFlowExporter
         backend.load(self.task_name())
@@ -693,7 +694,7 @@ class LanguageModelingTask(Task):
         reader_params['nctx'] = reader_params.get('nctx', self.config_params.get('nctx', self.config_params.get('nbptt', 35)))
         reader_params['clean_fn'] = reader_params.get('clean_fn', self.config_params['preproc'].get('clean_fn'))
         reader_params['mxlen'] = self.vectorizers[self.primary_key].mxlen
-        if self.config_params['model'].get('gpus', 1) > 1:
+        if self.config_params['train'].get('gpus', 1) > 1:
             reader_params['truncate'] = True
         return baseline.reader.create_reader(self.task_name(), self.vectorizers, self.config_params['preproc'].get('trim', False), **reader_params)
 
@@ -750,7 +751,14 @@ class LanguageModelingTask(Task):
         unif = self.config_params.get('unif', 0.1)
         model['unif'] = model.get('unif', unif)
         #model['batchsz'] = self.config_params['batchsz']
-        model['tgt_key'] = self.config_params['loader'].get('tgt_key', self.primary_key)
+
+        model['tgt_key'] = self.config_params.get('reader',
+                                                  self.config_params.get('loader', {})).get('tgt_key', self.primary_key)
+        model['src_keys'] = listify(self.config_params.get('reader',
+                                                           self.config_params.get('loader',
+                                                                                  {})).get('src_keys',
+                                                                                           list(self.embeddings.keys())))
+
         if self.backend.params is not None:
             for k, v in self.backend.params.items():
                 model[k] = v

@@ -43,7 +43,6 @@ class ClassifierModelBase(ClassifierModel):
         :param basename:
         :return:
         """
-
         write_json(self._state, basename + '.state')
         write_json(self.labels, basename + ".labels")
         for key, embedding in self.embeddings.items():
@@ -187,7 +186,7 @@ class ClassifierModelBase(ClassifierModel):
 
     @classmethod
     def create(cls, embeddings, labels, **kwargs):
-        """The main method for creating all :class:`WordBasedModel` types.
+        """The main method for creating all :class:`ClassifierModelBase` types.
         
         This method instantiates a model with pooling and optional stacking layers.
         Many of the arguments provided are reused by each implementation, but some sub-classes need more
@@ -217,23 +216,24 @@ class ClassifierModelBase(ClassifierModel):
         """
 
         model = cls()
+        model.embeddings = {}
+        for k, embedding in embeddings.items():
+            model.embeddings[k] = embedding.detached_ref()
+        model.lengths_key = kwargs.get('lengths_key')
+        if model.lengths_key is not None:
+            model._unserializable.append(model.lengths_key)
+            model.lengths = kwargs.get('lengths', tf.placeholder(tf.int32, [None], name="lengths"))
+        else:
+            model.lengths = None
 
-        model.embeddings = embeddings
         model._record_state(**kwargs)
         inputs = {}
-        for k, embedding in embeddings.items():
+        for k, embedding in model.embeddings.items():
             x = kwargs.get(k, embedding.create_placeholder(name=k))
             inputs[k] = x
 
         model.pdrop_value = kwargs.get('dropout', 0.5)
         model.sess = kwargs.get('sess', tf.Session())
-        model.lengths_key = kwargs.get('lengths_key')
-        if model.lengths_key is not None:
-            model.lengths = kwargs.get('lengths', tf.placeholder(tf.int32, [None], name="lengths"))
-        else:
-            model.lengths = None
-
-
         model.labels = labels
         nc = len(model.labels)
         model.y = kwargs.get('y', tf.placeholder(tf.int32, [None, nc], name="y"))
@@ -367,7 +367,7 @@ class LSTMModel(EmbedPoolStackClassifier):
         :return: 
         """
         hsz = kwargs.get('rnnsz', kwargs.get('hsz', 100))
-        vdrop = bool(kwargs.get('variational_dropout', False))
+        vdrop = bool(kwargs.get('variational', False))
         if type(hsz) is list:
             hsz = hsz[0]
 
